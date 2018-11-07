@@ -13,31 +13,22 @@ import (
 )
 
 func main() {
-	withPool := flag.Bool("withPool", false, `whether to use sync.Pool`)
-	cpuProfile := flag.String("cpuprofile", "", `write cpu profile to the specified file`)
-	memProfile := flag.String("memprofile", "", `write memory profile to the specified file`)
-
-	flag.Parse()
-
 	handler := &httpHandler{
 		stop: make(chan bool),
 	}
+
+	withPool := flag.Bool("withPool", false,
+		`whether to use sync.Pool`)
+	flag.StringVar(&handler.flags.cpuprofile, "cpuprofile", "",
+		`write cpu profile to the specified file`)
+	flag.StringVar(&handler.flags.memprofile, "memprofile", "",
+		`write memory profile to the specified file`)
+	flag.Parse()
+
 	if *withPool {
 		handler.handleUserSearch = handleUserSearchWithPool
 	} else {
 		handler.handleUserSearch = handleUserSearch
-	}
-
-	if *cpuProfile != "" {
-		f := mustCreateFile(*cpuProfile)
-		if err := pprof.StartCPUProfile(f); err != nil {
-			panic(err)
-		}
-		defer pprof.StopCPUProfile()
-	}
-	if *memProfile != "" {
-		f := mustCreateFile(*memProfile)
-		defer writeMemStats(f)
 	}
 
 	go func() {
@@ -62,6 +53,12 @@ type userSearchRequest struct {
 type httpHandler struct {
 	stop chan bool
 
+	flags struct {
+		cpuprofile string
+		memprofile string
+	}
+	memprofFile *os.File
+
 	handleUserSearch func(*fasthttp.RequestCtx)
 }
 
@@ -69,11 +66,46 @@ func (h *httpHandler) handleRequest(ctx *fasthttp.RequestCtx) {
 	switch string(ctx.Path()) {
 	case "/userSearch":
 		h.handleUserSearch(ctx)
+	case "/startProfiling":
+		h.startProfiling()
+	case "/stopProfiling":
+		h.stopProfiling()
 	case "/stop":
 		h.stop <- true
 	default:
 		ctx.Error("unknown resource accessed", fasthttp.StatusNotFound)
 	}
+}
+
+func (h *httpHandler) startProfiling() {
+	if h.flags.cpuprofile != "" {
+		log.Printf("collecting CPU profile to %v", h.flags.cpuprofile)
+	}
+	if h.flags.memprofile != "" {
+		log.Printf("collecting mem profile to %v", h.flags.memprofile)
+	}
+
+	// CPU профилирование.
+	cpuprofFile := mustCreateFile(h.flags.cpuprofile)
+	if err := pprof.StartCPUProfile(cpuprofFile); err != nil {
+		log.Fatalf("failed to start cpu profiling", fasthttp.StatusInternalServerError)
+	}
+	// Heap профилирование.
+	h.memprofFile = mustCreateFile(h.flags.memprofile)
+}
+
+func (h *httpHandler) stopProfiling() {
+	pprof.StopCPUProfile()
+	writeMemStats(h.memprofFile)
+	h.memprofFile.Close()
+
+	if h.flags.cpuprofile != "" {
+		log.Printf("written CPU profile to %v", h.flags.cpuprofile)
+	}
+	if h.flags.memprofile != "" {
+		log.Printf("written mem profile to %v", h.flags.memprofile)
+	}
+
 }
 
 func handleUserSearch(ctx *fasthttp.RequestCtx) {
