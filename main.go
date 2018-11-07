@@ -78,6 +78,7 @@ func (h *httpHandler) handleRequest(ctx *fasthttp.RequestCtx) {
 }
 
 func (h *httpHandler) startProfiling() {
+	// Отладочное логгирование должно идти до профилирования.
 	if h.flags.cpuprofile != "" {
 		log.Printf("collecting CPU profile to %v", h.flags.cpuprofile)
 	}
@@ -86,12 +87,17 @@ func (h *httpHandler) startProfiling() {
 	}
 
 	// CPU профилирование.
-	cpuprofFile := mustCreateFile(h.flags.cpuprofile)
-	if err := pprof.StartCPUProfile(cpuprofFile); err != nil {
-		log.Fatalf("failed to start cpu profiling", fasthttp.StatusInternalServerError)
+	if h.flags.cpuprofile != "" {
+		cpuprofFile := mustCreateFile(h.flags.cpuprofile)
+		if err := pprof.StartCPUProfile(cpuprofFile); err != nil {
+			log.Fatalf("failed to start cpu profiling", fasthttp.StatusInternalServerError)
+		}
 	}
+
 	// Heap профилирование.
-	h.memprofFile = mustCreateFile(h.flags.memprofile)
+	if h.flags.memprofile != "" {
+		h.memprofFile = mustCreateFile(h.flags.memprofile)
+	}
 }
 
 func (h *httpHandler) stopProfiling() {
